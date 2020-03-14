@@ -77,7 +77,17 @@ class TankSaturdays(gym.Env):
         self.pad = self.tank_side//2
 
         self.action_space = spaces.Discrete(9)
-        self.observation_space = spaces.Discrete(np.prod(self.bf_size))
+
+        ram_size = (4*2 +
+                    4*self.max_boxes +
+                    4*(2*(self.bf_side//self.bullet_speed)+4) +
+                    4*self.n_walls)
+        self.observation_space = spaces.Tuple((
+            spaces.Box(low=0, high=10, shape=self.bf_size, dtype=np.int8),
+            spaces.Box(low=-np.inf, high=np.inf,
+                       shape=(ram_size,), dtype=np.int32)
+            ))
+
 
         self.action_map = {  # Not actually used, just for reference
             "idle": 0,

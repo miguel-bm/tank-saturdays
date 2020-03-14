@@ -1,0 +1,8 @@
+README.md
+setup.cfg
+setup.py
+tank_saturdays.egg-info/PKG-INFO
+tank_saturdays.egg-info/SOURCES.txt
+tank_saturdays.egg-info/dependency_links.txt
+tank_saturdays.egg-info/requires.txt
+tank_saturdays.egg-info/top_level.txt

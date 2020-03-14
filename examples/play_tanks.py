@@ -3,26 +3,19 @@
 
 import typer
 import gym
-import pandas as pd
 from gym import wrappers
-import pygame
+import tank_saturdays
 from pathlib import Path
-from envs.tank6 import TankSaturdays
 import termios, fcntl, sys, os
 import time
+import numpy as np
 
 
-def play_2048_human():
-    """Play an OpenAI 2048 game yourself.
-
-    This module creates an OpenAI Gym environment and allows you to play it
-    using your keyboard.
-    """
-    typer.echo(f"Playing 2048 with a human player.")
-
+def play_tanks():
+    typer.echo(f"Playing tank-saturdays with a human player.")
 
     # Make and seed the environment
-    env = TankSaturdays()
+    env = gym.make('TankSaturdays-v0')
     rendered=env.render(mode='console')
     obs = env.reset()
 
@@ -104,13 +97,10 @@ def play_2048_human():
         time.sleep(0.01)
 
         prev_obs = obs
-        observation, reward, env_done, _ = env.step(action, action_w=8)
+        observation, reward, env_done, _ = env.step(
+            action, np.random.randint(9))
         turn += 1
 
 
-
-
-
-
 if __name__ == "__main__":
-    typer.run(play_2048_human)
+    typer.run(play_tanks)

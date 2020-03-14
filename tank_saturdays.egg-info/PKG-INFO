@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: tank-saturdays
+Version: 0.1
+Summary: Gym environment that will be used in a competition between the members of the Reinforcement Learning track form the 3rd Edition of AI Saturdays Madrid.
+Home-page: https://github.com/miguel-bm/tank-saturdays
+Author: miguel-bm
+Author-email: miguel.blanco.marcos@gmail.com
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
