@@ -1,5 +1,20 @@
 """
 Gym Environment for Tank Saturdays.
+
+This environment simulates a battle between two tanks, with limited fuel,
+bullets, and hit-points. The tanks start in opposite sides of a square
+battlefield with randomly placed obstacles in the middle.
+
+If a tank loses all hit-points or gasoline, it loses. If both tanks lose in the
+same turn, it results in a draw. If the tanks collide, this also results in a
+draw.
+
+Every few turns, a box with extra fuel, bullets or HP might appear in the
+battlefield. It will not appear on walls, tanks, or other boxes. Tanks have to
+go over it in order to aquire the contents. Boxes are placed at the end of each
+turn. Bullets pass over boxes without colliding with them.
+
+Created by Pablo Talavante and Miguel Blanco.
 """
 
 
@@ -13,23 +28,30 @@ from recordclass import recordclass
 
 class TankSaturdays(gym.Env):
     metadata = {
-        'render.modes' : ['human', 'rgb_array'],
+        'render.modes' : ['rgb_array', 'console'],
         'video.frames_per_second' : 30
     }
 
     def __init__(self):
 
-        BATTLEFIELD_SIDE = 50
-        TANK_SIDE = 5
-        GAS = 1000
-        CARTRIDGE = 100
-        HP = 3
-        BULLET_SPEED = 5
-        IDLE_COST = 1
-        MOVE_COST = 2
-        N_WALLS = 10
-        WIDTH_WALLS = 2
-        IDLE_COUNTER = 50
+        BATTLEFIELD_SIDE = 50  # Distance between battlefield corners
+        TANK_SIDE = 5          # Size of the tanks
+        GAS = 2000             # Ammount of fuel in each tank at the start
+        CARTRIDGE = 100        # Ammount of bullets in each tank at the start
+        HP = 3                 # Hit-points each tank has at the start
+        BULLET_SPEED = 5       # Distance travelled by bullets each turn
+        IDLE_COST = 1          # Minimum fuel consumed each turn
+        MOVE_COST = 2          # Extra fuel consumed for moving in a turn
+        N_WALLS = 10           # Number of random walls placed at the start
+        WIDTH_WALLS = 2        # Width of the random walls
+        MTB_BOXES = 50         # Mean Turns Between boxes with loot
+        MAX_BOXES = 5          # Maximum number of boxes in the battlefield
+        BOX_FUEL_P = 0.5       # Probability of a box having fuel
+        BOX_BULLET_P = 0.3     # Probability of a box having bullets
+        BOX_HP_P = 0.2         # Probability of a box having extra hit-point
+        BOX_FUEL_AMNT = 200    # Amount of fuel in a fuel box
+        BOX_BULLET_AMNT = 20   # Amount of bullets in a bullet box
+        BOX_HP_AMNT = 1        # Amount of hit-points in a hit-point box
 
         # Game settings
         self.bf_side = BATTLEFIELD_SIDE
@@ -43,7 +65,12 @@ class TankSaturdays(gym.Env):
         self.n_walls = N_WALLS
         self.width_walls = WIDTH_WALLS
         self.length_walls = (self.tank_side, self.bf_side//2)
-        self.idle_counter = IDLE_COUNTER
+        self.mtb_boxes = MTB_BOXES
+        self.max_boxes = MAX_BOXES
+        self.box_probs = (BOX_FUEL_P, BOX_BULLET_P, BOX_HP_P)
+        self.box_amounts = {"gas": BOX_FUEL_AMNT,
+                            "bullet": BOX_BULLET_AMNT,
+                            "hp": BOX_HP_AMNT}
 
         self.bf_size = np.array([self.bf_side, self.bf_side])
         self.tank_size = np.array([self.tank_side, self.tank_side])
@@ -71,6 +98,7 @@ class TankSaturdays(gym.Env):
         self.dv_tuple = namedtuple('Velocities', ['dx', 'dy'])
         self.shoot_tuple = namedtuple('Shoot', ['x', 'y', 'dx', 'dy'])
         self.point = namedtuple('Point', ['x', 'y'])
+        self.box = namedtuple('Box', ['x', 'y', 'content', 'amount'])
 
         # Map of actions to tank movement, defaulting to no movement
         self.v_actions = defaultdict(lambda: self.dv_tuple(0, 0))
@@ -101,6 +129,7 @@ class TankSaturdays(gym.Env):
         self.reset()
 
     def seed(self, seed=None):
+        """Creates a numpy RandomState for use in other methods."""
         self.np_random, seed = seeding.np_random(
             seed if seed is not None else np.random.seed())
         return [seed]
@@ -117,7 +146,7 @@ class TankSaturdays(gym.Env):
         # Reset bullets in play
         self.bullets = []
         self.new_bullets = []
-        self.hits = []  # Merely for rendering purposes
+        self.hits = []  # Merely for rendering purposes, but need to keep track
 
         # Put walls in random locations in the center of the battlefield
         self.wall_m = np.zeros(self.bf_size)
@@ -136,6 +165,9 @@ class TankSaturdays(gym.Env):
 
             self.walls.append(self.wall(x0, y0, x1, y1))
             self.wall_m[x0:x1, y0:y1] = 1  # Matrix with ones in wall positions
+
+        # Reset boxes
+        self.boxes = []
 
         self.state = None
         return self._get_obs()
@@ -185,17 +217,17 @@ class TankSaturdays(gym.Env):
         # Shoot new bullets
         self._shoot_bullets(action_b_s, action_w_s)
 
-        # Substract bullets from cartridge
-        if action_b_s is not None: self.black.cartridge -= 1
-        if action_w_s is not None: self.white.cartridge -= 1
+        # Substract bullets from cartridge if there was a shoot action
+        if action_b_s: self.black.cartridge -= 1
+        if action_w_s: self.white.cartridge -= 1
 
         # Check bullet-wall collisions and remove collided bullets
         self._bullet_wall_collisions()  # Before extend, due to bullet speed
 
         # Check bullet-tank collisions
         self.hits = []  # This is just for rendering, no effect on gameplay
-        black_shot = self._bullet_tank_collision(self.black)
-        white_shot = self._bullet_tank_collision(self.white)
+        if self._bullet_tank_collision(self.black): self.black.HP -= 1
+        if self._bullet_tank_collision(self.white): self.white.HP -= 1
 
         # Add new bullets to record of bullets in flight
         self.bullets.extend(self.new_bullets)
@@ -210,23 +242,31 @@ class TankSaturdays(gym.Env):
         if self._tank_collision():
             return self._get_obs(), 0, True, {}
 
-        # Update HP and end game in case of death(s)
-        if black_shot: self.black.HP -= 1
-        if white_shot: self.white.HP -= 1
-        if (self.black.HP == 0) and (self.white.HP == 0):  # Draw
+        # Check if tanks caught any boxes. Remove those boxes and add contents
+        self._catch_boxes(self.black)
+        self._catch_boxes(self.white)
+
+        # End game in case of death(s)
+        if (self.black.HP <= 0) and (self.white.HP <= 0):  # Draw
             return self._get_obs(), 0, True, {}
-        elif self.black.HP == 0:  # White tank wins
+        elif self.black.HP <= 0:  # White tank wins
             return self._get_obs(), -1, True, {}
-        elif self.white.HP == 0:  # Black tank wins
+        elif self.white.HP <= 0:  # Black tank wins
             return self._get_obs(), 1, True, {}
 
         # If tank runs out of gas, they lose
         if (self.black.gas <= 0) and (self.white.gas <= 0):
             return self._get_obs(), 0, True, {}
-        elif self.black.gas == 0:  # White tank wins
+        elif self.black.gas <= 0:  # White tank wins
             return self._get_obs(), -1, True, {}
-        elif self.white.gas == 0:  # Black tank wins
+        elif self.white.gas <= 0:  # Black tank wins
             return self._get_obs(), 1, True, {}
+
+        # Attempt to place a box with extra consumables
+        if (self.np_random.uniform() < 1./self.mtb_boxes):
+            box_type = self.np_random.choice(("gas", "bullet", "hp"),
+                p=self.box_probs)
+            self._place_box(box_type)
 
         # By default, no rewards are given and game continues
         return self._get_obs(), 0, False, {}
@@ -420,6 +460,47 @@ class TankSaturdays(gym.Env):
                      (self.black.y+self.pad+1 > self.white.y-self.pad))
         return x_collide and y_collide
 
+    def _catch_boxes(self, tank):
+        # Determine which boxes were caught
+        left_boxes = []
+        for box in self.boxes:
+            if self._point_in_tank(tank, box.x, box.y):
+                if box.content == "gas":
+                    tank.gas += box.amount
+                elif box.content == "bullet":
+                    tank.cartridge += box.amount
+                elif box.content == "hp":
+                    tank.HP += box.amount
+            else:
+                left_boxes.append(box)
+        self.boxes = left_boxes
+
+    def _place_box(self, box_type):
+        """Place a box of consumables on a randomly chosen free spot."""
+
+        # If already at max boxes, remove the one oldest one
+        if len(self.boxes) == self.max_boxes:
+            del self.boxes[0]
+
+        # Find a free spot for the box
+        free_spots = np.ones(self.bf_size, dtype=np.bool)
+        free_spots[self.black.x-self.pad:self.black.x+self.pad+1,
+                   self.black.y-self.pad:self.black.y+self.pad+1] = False
+        free_spots[self.white.x-self.pad:self.white.x+self.pad+1,
+                   self.white.y-self.pad:self.white.y+self.pad+1] = False
+        for wall in self.walls:  # Walls are 7
+            free_spots[wall.x0:wall.x1, wall.y0:wall.y1] = False
+
+        free_spots_idx = list(np.argwhere(free_spots))
+        idx_choice = self.np_random.choice(len(free_spots_idx))
+        spot_x, spot_y = free_spots_idx[idx_choice]
+
+        # Define the box
+        box = self.box(spot_x, spot_y, box_type, self.box_amounts[box_type])
+
+        # Place the box
+        self.boxes.append(box)
+
     def render(self, mode='console'):
 
         if mode == 'rgb_array':
@@ -434,6 +515,11 @@ class TankSaturdays(gym.Env):
                           self.black.y-self.pad:self.black.y+self.pad+1] = '■'
             self.render_m[self.white.x-self.pad:self.white.x+self.pad+1,
                           self.white.y-self.pad:self.white.y+self.pad+1] = '□'
+
+            # Boxes
+            box_char = {"gas": "F", "bullet": "B", "hp": "H"}
+            for box in self.boxes:
+                self.render_m[box.x, box.y] =  box_char[box.content]
 
             # Bullets
             for bullet in self.bullets:
