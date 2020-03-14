@@ -283,22 +283,28 @@ class TankSaturdays(gym.Env):
         self.image[self.white.x-self.pad:self.white.x+self.pad+1,
                    self.white.y-self.pad:self.white.y+self.pad+1] = 2
 
-        # Bullets
+        # Boxes are 3 for gas, 4 for bullets and 5 for hp
+        box_num = {"gas": 0, "bullet": 1, "hp": 2}
+        for box in self.boxes:
+            self.image[box.x, box.y] = box_num[box.content] + 3
+
+        # Bullets. This might overwrite boxes in the image (but not in ram)
         for bullet in self.bullets:
-            if bullet.dy < 0:    # Bullet moving up is 3
-                self.image[bullet.x, bullet.y] = 3
-            elif bullet.dx > 0:  # Bullet moving right is 4
-                self.image[bullet.x, bullet.y] = 4
-            elif bullet.dy > 0:  # Bullet moving down is 5
-                self.image[bullet.x, bullet.y] = 5
-            elif bullet.dx < 0:  # Bullet moving left is 6
+            if bullet.dy < 0:    # Bullet moving up is 6
                 self.image[bullet.x, bullet.y] = 6
+            elif bullet.dx > 0:  # Bullet moving right is 7
+                self.image[bullet.x, bullet.y] = 7
+            elif bullet.dy > 0:  # Bullet moving down is 8
+                self.image[bullet.x, bullet.y] = 8
+            elif bullet.dx < 0:  # Bullet moving left is 9
+                self.image[bullet.x, bullet.y] = 9
 
         # Walls
-        for wall in self.walls:  # Walls are 7
-            self.image[wall.x0:wall.x1, wall.y0:wall.y1] = 7
+        for wall in self.walls:  # Walls are 10
+            self.image[wall.x0:wall.x1, wall.y0:wall.y1] = 10
 
-        # Gather variables from tanks, bullets, walls
+
+        # Gather variables from tanks, bullets, boxes, walls
         tank_info = [self.black.x,
                      self.black.y,
                      self.black.gas,
@@ -311,20 +317,38 @@ class TankSaturdays(gym.Env):
                      self.white.HP,
                      ]
 
+        box_info = []
+        for i in range(self.max_boxes):
+            if i < len(self.boxes):
+                box = self.boxes[i]
+                box_info.extend([box.x,
+                                 box.y,
+                                 box_num[box.content],
+                                 box.amount])
+            else:
+                box_info.extend([-1,-1,-1,-1])  # Invalid box out of bounds
+
         max_possible_bullets = 2*(self.bf_side//self.bullet_speed) + 4
         bullet_info = []
         for i in range(max_possible_bullets):
             if i < len(self.bullets):
                 bullet = self.bullets[i]
-                bullet_info.extend([bullet.x, bullet.y, bullet.dx, bullet.dy])
+                bullet_info.extend([bullet.x,
+                                    bullet.y,
+                                    bullet.dx,
+                                    bullet.dy])
             else:
-                bullet_info.extend([0,0,0,0])
+                bullet_info.extend([-1,-1,0,0])  # Unmoving bullet out of bounds
 
         wall_info = []
-        for i, wall in enumerate(self.walls):
-            wall_info.extend([wall.x0, wall.y0, wall.x1, wall.y1])
+        for wall in self.walls:
+            wall_info.extend([wall.x0,
+                              wall.y0,
+                              wall.x1,
+                              wall.y1])
 
-        self.ram = np.array(tank_info + bullet_info + wall_info)
+        self.ram = np.array(tank_info + box_info + bullet_info + wall_info,
+                   dtype=np.int32)
         self.state = (self.image, self.ram)
         return self.state
 
@@ -488,7 +512,7 @@ class TankSaturdays(gym.Env):
                    self.black.y-self.pad:self.black.y+self.pad+1] = False
         free_spots[self.white.x-self.pad:self.white.x+self.pad+1,
                    self.white.y-self.pad:self.white.y+self.pad+1] = False
-        for wall in self.walls:  # Walls are 7
+        for wall in self.walls:
             free_spots[wall.x0:wall.x1, wall.y0:wall.y1] = False
 
         free_spots_idx = list(np.argwhere(free_spots))
