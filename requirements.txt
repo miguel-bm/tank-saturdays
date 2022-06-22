@@ -1,4 +1,4 @@
 gym==0.15.6
-numpy==1.17.2
+numpy==1.22.0
 recordclass==0.13.2
 typer==0.0.10
